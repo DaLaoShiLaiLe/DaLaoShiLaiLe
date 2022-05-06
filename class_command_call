@@ -1,0 +1,311 @@
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.Runtime;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using AcDoNetTools;
+using blocktool;
+using System.Runtime.InteropServices;
+
+
+namespace 中心线添加
+{
+    public class Class1
+    {
+       
+
+
+
+        //}
+        /// <summary>
+        /// 插入表格
+        /// </summary>
+        [CommandMethod("StarkTableDemo")]
+
+        public void StarkTableDemo()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Editor ed = Application.DocumentManager.MdiActiveDocument.Editor;
+            db.AddLayer("桩号");
+            db.SetCurrentLayer("文字");
+            PromptEntityResult per = ed.GetEntity("选择多段线");
+            if (per.Status != PromptStatus.OK) return;
+            PromptResult pso = ed.GetString("\n请输入桩号前缀：");
+            if (pso.Status != PromptStatus.OK) return;
+            PromptPointResult ppr = ed.GetPoint("\n请选择多段线的起始点：");
+            if (ppr.Status != PromptStatus.OK) return;
+            PromptDoubleResult pso1 = ed.GetDouble("\n请输入桩号起始值：");
+            if (pso1.Status == PromptStatus.Cancel) return;
+            double startval = 0.0;
+            if (pso1.Status == PromptStatus.OK) startval = pso1.Value;
+
+            List<double> midlenth = new List<double>();
+            List<Point3d> point = new List<Point3d>();
+            List<string> value = new List<string>();
+            List<double> length = new List<double>();
+            //bool button = true;//if polyline startpoint ==ppr's value
+            if (per.Status == PromptStatus.OK)
+            {
+                using (Transaction trans = db.TransactionManager.StartTransaction())
+                {
+                    Polyline pl = (Polyline)per.ObjectId.GetObject(OpenMode.ForRead);
+                    pl.Polyline2Table(ppr.Value, pso.StringResult, startval, db, ed);
+                    trans.Commit();
+                }
+            }
+            
+        }
+
+
+        /// <summary>
+        /// 标桩号
+        /// </summary>
+        [CommandMethod("StarkDemo")]
+        public void StarkDemo()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Editor ed = Application.DocumentManager.MdiActiveDocument.Editor;
+            db.AddLayer("一期工可桩号");
+            db.SetCurrentLayer("一期工可桩号");
+            PromptEntityResult per = ed.GetEntity("选择多段线");
+            if (per.Status != PromptStatus.OK) return;
+            PromptResult pso = ed.GetString("\n请输入桩号前缀：");
+            if (pso.Status != PromptStatus.OK) return;
+            PromptPointResult ppr = ed.GetPoint("\n请选择多段线的起始点：");
+            if (ppr.Status != PromptStatus.OK) return;
+            PromptDoubleResult pso1 = ed.GetDouble("\n请输入桩号起始值：");
+            if (pso1.Status == PromptStatus.Cancel) return;
+            double startval = 0.0;
+            if (pso1.Status == PromptStatus.OK) startval = pso1.Value;
+
+            if (per.Status == PromptStatus.OK)
+            {
+
+                using (Transaction trans = db.TransactionManager.StartTransaction())
+                {
+
+                    Polyline pl = (Polyline)per.ObjectId.GetObject(OpenMode.ForRead);
+                    Polyline_property[] pl_prop = new Polyline_property[pl.NumberOfVertices + 1];
+                    pl.Polyline2Stark(ppr.Value, pso.StringResult, pso1.Value, db, ed, out pl_prop);
+                    trans.Commit();//缺少提交，在一个已开transaction里用了诸如brId.UpdateBlockAttr(attrNameValues)之类的包含事务提交的函数，不加这行，仍显示不出
+                }
+            }
+        }
+
+        /// <summary>
+        /// 护岸断面布置表
+        /// </summary>
+        [CommandMethod("DeployDemo")]
+        public void DeployDemo()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Editor ed = Application.DocumentManager.MdiActiveDocument.Editor;
+            PromptEntityResult per = ed.GetEntity("选择多段线");
+            Polyline pline = new Polyline();
+            if (per.Status != PromptStatus.OK) return;
+            if (per.Status == PromptStatus.OK)
+            {
+                using (Transaction trans = db.TransactionManager.StartTransaction())
+                {
+                    pline = (Polyline)per.ObjectId.GetObject(OpenMode.ForRead);
+                }
+            }
+
+            List<double> length = new List<double>();
+            double length0 = 0;
+            double length1 = 0;
+            double angle = 0;
+
+            List<string> str = new List<string>();//护岸类型的起讫点桩号
+            List<string> str_type = new List<string>();//护岸类型
+
+            Point3d p0 = new Point3d();
+            Point3d p1 = new Point3d();
+            Point3d ppt0 = new Point3d();
+            Point3d ppt1 = new Point3d();
+
+            PromptEntityResult per0 = ed.GetEntity("\n选择布置断面区间的起点桩号：");
+            if (per0.Status != PromptStatus.OK) return;
+
+            while (per0.Status == PromptStatus.OK)
+            {
+                string str_tmpt = "";
+                using (Transaction trans = db.TransactionManager.StartTransaction())
+                {
+                    BlockReference br = (BlockReference)per0.ObjectId.GetObject(OpenMode.ForRead);
+                    p0 = br.Position;
+                    angle = br.Rotation;
+                    ppt0 = p0.Polarpoint(50, angle);
+                    length0 = pline.GetDistAtPoint(p0);
+                    foreach (ObjectId item in br.AttributeCollection)//只看br的属性集合
+                    {
+                        AttributeReference attRef = (AttributeReference)item.GetObject(OpenMode.ForRead);
+                        str_tmpt = attRef.TextString;
+                    }
+                }
+
+                per0 = ed.GetEntity("\n选择布置断面区间的下一点的桩号：|or Esc to end.");
+                //if (per0.Status != PromptStatus.OK) return;
+                if (per0.Status == PromptStatus.OK)
+
+                    using (Transaction trans = db.TransactionManager.StartTransaction())
+                    {
+                        BlockReference br = (BlockReference)per0.ObjectId.GetObject(OpenMode.ForRead);
+                        p1 = br.Position;
+                        length1 = pline.GetDistAtPoint(p1);
+                        ppt1 = p1.Polarpoint(50, angle);
+                        foreach (ObjectId item in br.AttributeCollection)//只看br的属性集合
+                        {
+                            AttributeReference attRef = (AttributeReference)item.GetObject(OpenMode.ForRead);
+                            str_tmpt = str_tmpt + "~" + attRef.TextString;
+                        }
+                    }
+
+                PromptResult pso = ed.GetString("\n请输入护岸类型（如A1|B2）：");
+                string str_type_tempt = pso.StringResult + "型护岸";
+                str_type.Add(str_type_tempt);
+                double length_tempt = Math.Abs(length1 - length0);
+                length.Add(length_tempt);
+                str.Add(str_tmpt);
+
+                Vector2d dir = new Vector2d();
+                double dir_angle = 0;
+
+                ObjectId spaceId = db.CurrentSpaceId;//获取当前空间（模型空间或图纸空间）
+                string layer = "0";///////////////////////////////////////////////////////////
+                db.SetCurrentLayer(layer);
+                if (p1.X - p0.X > 0)
+                {
+                    dir = new Vector2d(p1.X - p0.X, p1.Y - p0.Y);
+                    dir_angle = dir.Angle;
+                    Point3d p2 = ppt0.GetCenterPointBetweenTwoPoint(ppt1);//镜像点1
+                    Point3d p3 = p2.Polarpoint(10, dir_angle + Math.PI * 0.5);//镜像点2
+                    Dictionary<string, string> attrNameValues = new Dictionary<string, string>();
+                    attrNameValues.Add("护岸类型", str_type_tempt);//默认保留两位小数，分隔符隔开 
+                    MyBlockTableRecord.AttrBlock4Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock4Name, MyBlockTableRecord.AttrBlock4Ents);
+                    ObjectId brId0 = spaceId.InsertBlockReference(layer, MyBlockTableRecord.Attrblock4Name, ppt0, new Scale3d(1, 1, 1), dir_angle, attrNameValues);
+                    brId0.UpdateBlockAttr(attrNameValues);//属性已加，只是为了改字体样式
+                    Entity ent = brId0.MirrorEntity(p2, p3, false);
+                    ent.ObjectId.UpdateBlockAttrMirroredInXY(true, false);
+                }
+
+                if (p1.X - p0.X <= 0)//from right to left
+                {
+                    dir = new Vector2d(p1.X - p0.X, p1.Y - p0.Y);
+                    dir_angle = dir.Angle;
+                    Point3d p2 = ppt0.GetCenterPointBetweenTwoPoint(ppt1);
+                    Point3d p3 = p2.Polarpoint(10, dir_angle + Math.PI * 0.5);
+                    Dictionary<string, string> attrNameValues = new Dictionary<string, string>();
+                    attrNameValues.Add("护岸类型", str_type_tempt);//默认保留两位小数，分隔符隔开 
+                    MyBlockTableRecord.AttrBlock4Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock4Name, MyBlockTableRecord.AttrBlock4Ents);
+                    ObjectId brId0 = spaceId.InsertBlockReference(layer, MyBlockTableRecord.Attrblock4Name, ppt0, new Scale3d(1, 1, 1), dir_angle, attrNameValues);
+                    brId0.UpdateBlockAttr(attrNameValues);
+                    brId0.UpdateBlockAttrMirroredInXY(true, true);//反转、颠倒
+                    Entity ent = brId0.MirrorEntity(p2, p3, false);
+                    ent.ObjectId.UpdateBlockAttrMirroredInXY(false, true);
+                }
+            }
+
+            Cad2Table(db, ed, str, str_type, length);
+
+        }
+        private void Cad2Table(Database db, Editor ed, List<string> str, List<string> str_type, List<double> length)
+        {
+            using (Transaction trans = db.TransactionManager.StartTransaction())
+            {
+                Table table = new Table();
+
+                int vn = str.Count;
+                table.SetSize(vn + 3, 4);
+                PromptPointResult ppt = ed.GetPoint("\n选择表格插入点位置：");
+                table.Position = ppt.Value;
+                table.SetRowHeight(8);
+                table.SetColumnWidth(25);
+                table.Columns[0].Width = 20;
+                table.Columns[1].Width = 60;
+
+                table.Cells.TextStyleId = db.AddTextStyle("ziti");
+
+                table.Cells[0, 0].TextString = "护岸断面布置表";
+                table.Cells.TextHeight = 5;
+                table.Cells.Alignment = CellAlignment.MiddleRight;
+                table.Cells[0, 0].Alignment = CellAlignment.MiddleCenter;
+                table.Cells[1, 0].TextString = "岸线位置";
+                table.Cells[1, 1].TextString = "岸线桩号";
+                table.Cells[1, 2].TextString = "护岸类型";
+                table.Cells[1, 3].TextString = "长度（m）";
+                table.Cells[vn + 2, 0].TextString = "小计";
+                CellRange range = CellRange.Create(table, 2, 0, vn + 1, 0);
+                table.MergeCells(range);
+                PromptResult pso = ed.GetString("\n请输入岸线位置：(如南岸|西岸)");
+                table.Cells[2, 0].TextString = pso.StringResult;//用户手动输入
+                table.Cells[vn + 2, 3].TextString = string.Format("{0:N}", length.Sum());
+
+                for (var i = 0; i < vn; i++)
+                {
+                    table.Cells[i + 2, 1].TextString = string.Format("{0:N}", str[i]);
+                    table.Cells[i + 2, 2].TextString = string.Format("{0:N}", str_type[i]);
+                    table.Cells[i + 2, 3].TextString = string.Format("{0:N}", length[i]);
+                }
+
+                BlockTable bt = (BlockTable)trans.GetObject(db.BlockTableId, OpenMode.ForRead);
+                BlockTableRecord btr = (BlockTableRecord)trans.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                btr.AppendEntity((Entity)table);
+                trans.AddNewlyCreatedDBObject((Entity)table, true);
+                trans.Commit();
+            }
+        }
+        [CommandMethod("polylineDemo")]
+        public void polylineDemo()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Polyline pline = new Polyline();
+            Point2d p1 = new Point2d(100, 0);
+            Point2d p2 = new Point2d(300, 0);
+            Point2d p3 = new Point2d(300, 200);
+            Point2d p4 = new Point2d(100, 200);
+            pline.AddVertexAt(0, p1, 0, 0, 0);
+            pline.AddVertexAt(1, p2, 1, 0, 0);
+            pline.AddVertexAt(2, p3, 0, 0, 0);
+            pline.AddVertexAt(3, p4, 1, 0, 0);
+            pline.Closed = true;
+            db.AddEntityToModeSpace(pline);
+            Point3d pt = new Point3d(300, 200, 0);
+            double l = pline.GetDistAtPoint(pt);
+            double n = pline.GetParameterAtPoint(pt);
+            double a = pline.GetParameterAtDistance(100);
+            double b = pline.GetParameterAtDistance(300);
+            double c = pline.GetParameterAtDistance(350);
+        }
+
+        [CommandMethod("TableDemo")]
+        public void TableDemo()
+        {
+            Database db = HostApplicationServices.WorkingDatabase;
+            Editor ed = Application.DocumentManager.MdiActiveDocument.Editor;
+            PromptEntityResult per = ed.GetEntity("表格");
+            if (per.Status == PromptStatus.OK)
+            {
+                using (Transaction trans = db.TransactionManager.StartTransaction())
+                {
+                    BlockReference br = (BlockReference)per.ObjectId.GetObject(OpenMode.ForRead);
+
+                }
+            }
+        }
+
+
+
+
+
+    }
+
+}
+
+
+
