@@ -1,0 +1,608 @@
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using AcDoNetTools;
+using Autodesk.AutoCAD.ApplicationServices;
+using blocktool;
+
+namespace 中心线添加
+{
+
+    public struct Polyline_property
+    {        
+        public Point3d point;//vertices 
+        public double midlenth;
+        public string midangle;//line\radius angle
+        public double lengthfromstart;
+        public string starkpre;//prefix
+    }
+    
+    public static class PolylineTool
+    {
+        /// <summary>
+        /// draw stark of List<Polyline>
+        /// </summary>
+        /// <param name="plines">List<Polyline></param>
+        /// <param name="startpoint_set"></param>
+        /// <param name="stark_pre_user"></param>
+        /// <param name="startval"></param>
+        /// <param name="db"></param>
+        /// <param name="ed"></param>
+        public static void Polyline2Stark(this List<Polyline> plines, Point3d startpoint_set, string stark_pre_user, double startval, Database db, Editor ed)
+        {
+            plines.GetRestPlines(startpoint_set, stark_pre_user, startval, db,ed,out double length);//has deminished by 1
+            int[] index=plines.GetSortArrayIndex(startpoint_set);
+            
+
+            Point3d startpoint_tempt = new Point3d(startpoint_set.X, startpoint_set.Y,0);
+            double a, b = 0;
+            Point3d startpoint=new Point3d();
+            int j = 0;
+            double startlength = length;
+            for (int i=0;i< index.Length;i++)
+            {
+                j = index[i];
+                a =startpoint_tempt.GetDistanceBetweenTwoPoint(plines[j].StartPoint);
+                b = startpoint_tempt.GetDistanceBetweenTwoPoint(plines[j].EndPoint);
+                if (a <= b) startpoint=plines[j].StartPoint;
+                if (a > b) startpoint = plines[j].EndPoint;
+                plines[j].Polyline2Stark(startpoint, stark_pre_user, startlength, db,ed,out Polyline_property[] polyline_p);
+                //plines[j].Polyline2Table(startpoint, stark_pre_user, startlength, db, ed);
+                startlength += plines[j].Length;
+                startpoint_tempt = startpoint;
+                
+            }
+        }
+        /// <summary>
+        /// Get Index of Array sorted
+        /// </summary>
+        /// <param name="plines">List<Polyline></param>
+        /// <param name="startpoint"></param>
+        /// <returns>int[]</returns>
+        public static int[] GetSortArrayIndex(this List<Polyline> plines,Point3d startpoint)
+        {
+            List<double> dist= new List<double>();
+            double[] dist_temp = new double[plines.Count];
+            int[] index = new int[plines.Count];
+            for (int i=0;i<plines.Count;i++)
+            {                
+                dist.Add(startpoint.GetDistanceBetweenTwoPoint(plines[i].GetPolylineMiddle()));
+                dist_temp[i]= dist[i];
+            }
+            Array.Sort(dist_temp);//Array has been changed after sorted.while through Array.sort(list.toArray()), list won't change anything.
+
+            for (int i=0;i< dist_temp.Length;i++)
+            {
+               index[i]= Array.IndexOf(dist.ToArray(),dist_temp[i]);
+            }
+            return index;
+        }
+        
+        public static Point3d GetPolylineMiddle(this Polyline pl)
+        {           
+            double X = pl.StartPoint.X + pl.EndPoint.X;
+            double Y = pl.StartPoint.Y + pl.EndPoint.Y;
+            Point3d mid = new Point3d(X,Y,0);
+            return mid;
+        }
+        /// <summary>
+        /// get rid of the polyline that contains the startpoint_set, and draw the first polyline's stark.
+        /// </summary>
+        /// <param name="plines">List<Polyline></param>
+        /// <param name="startpoint_set"></param>
+        /// <param name="stark_pre_user"></param>
+        /// <param name="startval"></param>
+        /// <param name="db"></param>
+        /// <param name="ed"></param>
+        /// <param name="length">out </param>
+        /// <returns>List<Polyline></returns>
+        public static List<Polyline> GetRestPlines(this List<Polyline> plines , Point3d startpoint_set, string stark_pre_user, double startval, Database db, Editor ed,out double length)
+        {
+            int f = 0;
+            //Polyline pl_t=new Polyline();
+            //List<Polyline> plines_tar = new List<Polyline>();
+            for (int i =0;i<plines.Count;i++)
+            {
+                if (startpoint_set.GetDistanceBetweenTwoPoint(plines.ToArray()[i].StartPoint) < Math.Pow(10, -2) | startpoint_set.GetDistanceBetweenTwoPoint(plines.ToArray()[i].EndPoint) < Math.Pow(10, -2))
+                {
+                    f = i;
+                    break;
+                }
+            }
+            length = plines[f].Length;
+            Polyline_property[] pl_prop = new Polyline_property[plines[f].NumberOfVertices + 1];
+            plines[f].Polyline2Stark(startpoint_set,stark_pre_user,startval,db,ed,out pl_prop);
+            //plines[f].Polyline2Table(startpoint_set,stark_pre_user,startval,db,ed);
+            //plines_tar.Add(plines[f]);
+            plines.RemoveAt(f);
+            return plines;
+        }
+
+        /// <summary>
+        /// get stark,and stark property data
+        /// </summary>
+        /// <param name="pl">target polyline</param>
+        /// <param name="startpoint_set">user's want start</param>
+        /// <param name="stark_pre_user">stark prefix </param>
+        /// <param name="startval">begin value</param>
+        /// <param name="db"></param>
+        /// <param name="ed"></param>
+        /// <param name="polyline_p">stark property data</param>
+        public static void Polyline2Stark(this Polyline pl, Point3d startpoint_set, string stark_pre_user, double startval, Database db, Editor ed,out Polyline_property[] polyline_p)
+        {
+            bool button = true;
+            int vn = pl.NumberOfVertices;
+            if (pl.Closed != true) 
+            {
+                polyline_p = new Polyline_property[vn]; 
+            }
+            else 
+            { 
+                polyline_p = new Polyline_property[vn+1];
+            }
+
+            //polyline_p = null;//adding it will shut down CAD.
+
+            using (Transaction trans = db.TransactionManager.StartTransaction())
+            {
+                //if startpoint is user's want，button=true,however,invalid for the closed-polyline.
+                if (pl.StartPoint.GetDistanceBetweenTwoPoint(startpoint_set) >= Math.Pow(10, -2)) button = false;
+                if(button) 
+                {
+                    for (int i = 0; i < vn - 1; i++)
+                    {
+                        polyline_p[i].point = pl.GetVertices().ToArray()[i];
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < vn - 1; i++)
+                    {
+                        polyline_p[i].point = pl.reverse_vertices().ToArray()[i];
+                    }
+                }
+
+                for (int i = 0; i < vn - 1; i++)
+                {
+                    polyline_p[i].midlenth = pl.GetMidlengths(button).ToArray()[i];
+                    polyline_p[i].midangle = pl.GetMidAngle(button).ToArray()[i];
+                    polyline_p[i].lengthfromstart = pl.GetLengthfromStart(button).ToArray()[i];//max index is vn-2
+                }
+
+                if (button) polyline_p[vn - 1].point = pl.GetVertices().ToArray()[vn - 1];//1 more than mid-value
+                if(! button) polyline_p[vn - 1].point = pl.reverse_vertices().ToArray()[vn - 1];
+
+                polyline_p[vn - 1].lengthfromstart = pl.GetLengthfromStart(button).ToArray()[vn - 1];
+                if (pl.Closed == true)
+                {
+                    polyline_p[vn - 1].midlenth = pl.GetMidlengths(button).ToArray()[vn - 1];//1 more than non-closed polyline.
+                    polyline_p[vn - 1].midangle = pl.GetMidAngle(button).ToArray()[vn - 1];
+                    polyline_p[vn].lengthfromstart = pl.GetLengthfromStart(button).ToArray()[vn];//2 more than non-closed polyline,which the length of array is vn+1.
+                }
+                
+                List<string> pre = new List<string>();
+                for (int i = 0; i < vn; i++)
+                {
+                    polyline_p[i].lengthfromstart += startval;
+                    //Math.Floor向下取整;PadLeft(int totalWidth, char paddingChar) //在字符串左边用 paddingChar 补足 totalWidth 长度 
+                    polyline_p[i].starkpre = stark_pre_user + getstarklengthstyle( polyline_p[i].lengthfromstart);   
+                }
+
+                //PromptPointResult ppt2 = ed.GetPoint("\n选择旋转向量方向的第1点：");
+                //if (ppt2.Status != PromptStatus.OK) return ;
+                Point3d p2 = new Point3d();
+                Point3d p3 = new Point3d();
+                if (button) p2=pl.StartPoint;
+                if (!button) p2 = pl.EndPoint;
+
+                PromptPointOptions ppo = new PromptPointOptions("\n选择旋转向量方向的终点：");
+                ppo.AllowNone = true;
+                ppo.BasePoint = p2;//Basepoint is pline's startpoint. 
+                ppo.UseBasePoint = true;//without it, the frontline shows no change.
+                PromptPointResult ppr = ed.GetPoint(ppo);
+                if (ppr.Status == PromptStatus.Cancel) return ;
+                if (ppr.Status == PromptStatus.None) return;
+                if (ppr.Status==PromptStatus.OK)  p3 = ppr.Value;
+
+                Vector3d dir = p2.GetVectorTo(p3);
+                double angle = dir.GetRotateAngle();
+
+                if (pl.Closed != true)
+                {
+                    for (var i = 0; i < vn; i++)
+                    {                        
+                        MyBlockTableRecord.AttrBlock3Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock3Name, MyBlockTableRecord.AttrBlock3Ents);
+                        ObjectId brId = db.InsertAttrBlockReference(MyBlockTableRecord.AttrBlock3Id, polyline_p[i].point, angle, new Scale3d(1, 1, 1));
+                        Dictionary<string, string> attrNameValues = new Dictionary<string, string>();                        
+                        attrNameValues.Add("桩号", polyline_p[i].starkpre);//默认保留两位小数，分隔符隔开 ;
+                        brId.UpdateBlockAttr(attrNameValues, angle);
+                    }
+                }
+                else
+                {
+                    //0+000与终点 重合
+                    string starkPre0 = "";
+                    MyBlockTableRecord.AttrBlock3Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock3Name, MyBlockTableRecord.AttrBlock3Ents);
+                    ObjectId brId0 = db.InsertAttrBlockReference(MyBlockTableRecord.AttrBlock3Id, polyline_p[0].point, angle, new Scale3d(1, 1, 1));
+                    Dictionary<string, string> attrNameValues0 = new Dictionary<string, string>();
+                    starkPre0 = stark_pre_user + "000(" + getstarklengthstyle(polyline_p[vn].lengthfromstart) + ")";// xxx000(lll)  有第vn个点                  
+                    attrNameValues0.Add("桩号", starkPre0);//默认保留两位小数，分隔符隔开 ;
+                    brId0.UpdateBlockAttr(attrNameValues0);
+                    //continue;
+
+                    for (var i = 1; i < vn; i++)
+                    {                        
+                        MyBlockTableRecord.AttrBlock3Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock3Name, MyBlockTableRecord.AttrBlock3Ents);
+                        ObjectId brId = db.InsertAttrBlockReference(MyBlockTableRecord.AttrBlock3Id, polyline_p[i].point, angle, new Scale3d(1, 1, 1));
+                        Dictionary<string, string> attrNameValues = new Dictionary<string, string>();
+                        attrNameValues.Add("桩号", polyline_p[i].starkpre);//默认保留两位小数，分隔符隔开 );
+                        brId.UpdateBlockAttr(attrNameValues);
+                    }
+                }
+                trans.Commit();//缺少提交，在一个已开transaction里用了诸如brId.UpdateBlockAttr(attrNameValues)之类的包含事务提交的函数，不加这行，仍显示不出
+            }
+        }
+        // private PromptPointResult GetPoint(PromptPointOptions ppo)  
+        //{
+        //    ppo.AllowNone = true;
+
+        //}
+        /// <summary>
+        /// Produce stark property table.
+        /// </summary>
+        /// <param name="pl">polyline</param>
+        /// <param name="startpoint_set">startpoint setted by user</param>
+        /// <param name="stark_pre">stark prefix </param>
+        /// <param name="startval">start value</param>
+        /// <param name="db">database</param>
+        /// <param name="ed">editor</param>
+        public static void Polyline2Table(this Polyline pl,Point3d startpoint_set,string stark_pre,double startval, Database db,Editor ed)
+        {            
+            List<double> midlenth = new List<double>();
+            List<Point3d> point = new List<Point3d>();
+            List<string> value = new List<string>();
+            List<double> length = new List<double>();
+            bool button = true;
+            using (Transaction trans = db.TransactionManager.StartTransaction())
+            {
+                
+                if (pl.StartPoint.GetDistanceBetweenTwoPoint(startpoint_set) >= Math.Pow(10, -2)) button = false;//if startpoint is user's want
+                int vn = pl.NumberOfVertices;
+                if (button)
+                {
+                    point = pl.GetVertices();
+                    midlenth = pl.GetMidlengths(button);
+                    value = pl.GetMidAngle(button);
+                    length = pl.GetLengthfromStart(button);
+                }
+                else
+                {
+                    point = pl.reverse_vertices();
+                    midlenth = pl.GetMidlengths(button);
+                    value = pl.GetMidAngle(button);
+                    length = pl.GetLengthfromStart(button);
+                }
+                Table table = new Table();
+                //加桩号
+                List<string> pre = new List<string>();
+                for (int i = 0; i < length.Count; i++)
+                {
+                    length[i] += startval;//stark start value
+                                          //Math.Floor向下取整
+                    pre.Add(stark_pre + Math.Floor(length[i] / 1000).ToString() + "+" + (string.Format("{0:N}", (length[i] - Math.Floor(length[i] / 1000) * 1000))).PadLeft(6, '0'));
+                }
+
+
+                if (pl.Closed == true)
+                {
+                    table.SetSize(vn + 3, 5);//闭合多段线比非闭合的多一行
+                }
+                else
+                {
+                    //Table table = new Table();
+                    table.SetSize(vn + 2, 5);
+                }
+                PromptPointResult ppt = ed.GetPoint("\n选择表格插入点位置：");
+                table.Position = ppt.Value;
+                table.SetRowHeight(8);
+                table.SetColumnWidth(25);
+                table.Columns[0].Width = 30;
+                table.Cells[0, 0].TextString = "桩号特性表";
+                table.Cells.TextHeight = 5;
+                table.Cells.Alignment = CellAlignment.MiddleRight;
+                table.Cells.TextStyleId = db.AddTextStyle("ziti");
+                table.Cells[0, 0].Alignment = CellAlignment.MiddleCenter;
+                table.Cells[1, 0].TextString = "岸线桩号";
+                table.Cells[1, 1].TextString = "X坐标值";
+                table.Cells[1, 2].TextString = "Y坐标值";
+                table.Cells[1, 3].TextString = "特征值";
+                table.Cells[1, 4].TextString = "长度（m）";
+
+                table.Cells[2, 0].TextString = string.Format("{0:N}", pre[0]);
+                table.Cells[2, 1].TextString = point[0].Y.ToString();
+                table.Cells[2, 2].TextString = point[0].X.ToString();
+                for (var i = 0; i < vn; i++)
+                {
+                    table.Cells[i + 2, 0].TextString = string.Format("{0:N}", pre[i]);
+                    table.Cells[i + 2, 1].TextString = string.Format("{0:N}", point[i].Y);
+                    table.Cells[i + 2, 2].TextString = string.Format("{0:N}", point[i].X);
+                }
+                for (var i = 0; i < vn - 1; i++)
+                {
+                    table.Cells[i + 3, 3].TextString = value[i];
+                    table.Cells[i + 3, 4].TextString = string.Format("{0:N}", midlenth[i]);//两点间的弧长比点数少1.
+                }
+                if (pl.Closed == true)
+                {
+                    table.Cells[vn + 2, 0].TextString = string.Format("{0:N}", pre[vn]);
+                    table.Cells[vn + 2, 1].TextString = string.Format("{0:N}", point[0].Y);
+                    table.Cells[vn + 2, 2].TextString = string.Format("{0:N}", point[0].X);
+                    table.Cells[vn + 2, 3].TextString = value[vn - 1];
+                    table.Cells[vn + 2, 4].TextString = string.Format("{0:N}", midlenth[vn - 1]);
+                }
+
+                BlockTable bt = (BlockTable)trans.GetObject(db.BlockTableId, OpenMode.ForRead);
+                BlockTableRecord btr = (BlockTableRecord)trans.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+                btr.AppendEntity((Entity)table);
+                trans.AddNewlyCreatedDBObject((Entity)table, true);
+                trans.Commit();
+
+                #region//加桩号
+                //PromptResult pso=ed.GetString("\n请输入桩号前缀：");
+                //string starkPre = pso.StringResult;
+                //PromptPointResult ppt2 = ed.GetPoint("\n选择旋转向量方向：");
+                //Point3d p2=ppt2.Value;
+                ////Vector3d;
+                //Vector3d dir=new Vector3d(p2.X,p2.Y,p2.Z);
+                //double angle = dir.GetAngleTo(Vector3d.XAxis);
+                //for (var i = 0; i < vn; i++)
+                //{
+                //    MyBlockTableRecord.AttrBlock3Id = db.AddBlockTableRocord(MyBlockTableRecord.Attrblock3Name, MyBlockTableRecord.AttrBlock3Ents);
+                //    ObjectId brId = db.InsertAttrBlockReference(MyBlockTableRecord.AttrBlock3Id, point[i], angle, new Scale3d(1, 1, 1));
+                //    Dictionary<string, string> attrNameValues = new Dictionary<string, string>();
+                //    starkPre = starkPre + string.Format("{0:N}", length[i]);
+                //    attrNameValues.Add("桩号", string.Format("{0:N}", starkPre));//默认保留两位小数，分隔符隔开 );
+                //    brId.UpdateBlockAttr(attrNameValues);
+                //    starkPre = pso.StringResult;
+                //}
+
+                //db.AddEntityToModeSpace((Entity)table);//无法实现，不清楚原因
+                #endregion
+                
+            }
+        }
+        public static string getstarklengthstyle(double length)
+        {
+            string stark = Math.Floor(length / 1000).ToString() + "+" + (string.Format("{0:N}", (length - Math.Floor(length / 1000) * 1000))).PadLeft(6, '0');
+
+            return stark;
+        }
+
+        //public static void Polyline2Property(this Polyline pl,out List<double> midlenth)
+        //{
+
+        //}
+        /// <summary>
+        /// 获得polyline的倒序点列
+        /// </summary>
+        /// <param name="pl"></param>
+        /// <returns></returns>
+        public static List<Point3d> reverse_vertices(this Polyline pl)
+        {
+            List<Point3d> points = new List<Point3d>();
+            int vn = pl.NumberOfVertices;
+            Point3d ptt = new Point3d();
+            for (int i = 0; i < vn; i++)
+            {
+                //double bulge = pl.GetBulgeAt(i);
+                ptt = pl.GetPoint3dAt(vn-i-1);
+                points.Add(ptt);
+            }
+            return points;
+        }
+
+        public static List<Point3d> GetVertices(this Polyline pl)
+        {
+            int vn = pl.NumberOfVertices;
+            //List<double> midlenth = new List<double>();
+            List<Point3d> point = new List<Point3d>();
+            //List<double> angle = new List<double>();
+            Point3d ptt = new Point3d();
+            //Point3d ptt2 = new Point3d();
+            //double length = 0;
+
+            for (int i = 0; i < vn ; i++)
+            {
+                //double bulge = pl.GetBulgeAt(i);
+                ptt = pl.GetPoint3dAt(i);               
+                point.Add(ptt);                
+            }
+
+            return point;            
+        }
+        /// <summary>
+        /// 得到中间长度
+        /// </summary>
+        /// <param name="pl"></param>
+        /// <param name="button">用button判断多段线的起点是否是标注起点</param>
+        /// <returns></returns>
+        public static List<double> GetMidlengths(this Polyline pl,bool button)
+        {
+            int vn = pl.NumberOfVertices;
+            List<double> midlenth = new List<double>();           
+            Point3d ptt = new Point3d();
+            Point3d ptt2 = new Point3d();
+            double length = 0;
+            if (button)
+            {
+                for (int i = 0; i < vn - 1; i++)
+                {
+                    double bulge = pl.GetBulgeAt(i);
+                    ptt = pl.GetPoint3dAt(i);
+                    ptt2 = pl.GetPoint3dAt(i + 1);
+                    if (bulge == 0)
+                    {
+                        length = ptt.GetDistanceBetweenTwoPoint(ptt2);
+                        midlenth.Add(length);
+                    }
+                    else if (bulge != 0)
+                    {
+                        double l1 = pl.GetDistanceAtParameter(i);
+                        double l2 = pl.GetDistanceAtParameter(i + 1);
+                        length = l2 - l1;
+                        midlenth.Add(length);
+                    }
+                }
+            }
+            else 
+            {
+                for (int i = vn-1; i >0; i--)
+                {
+                    double bulge = pl.GetBulgeAt(i);
+                    ptt = pl.GetPoint3dAt(i);
+                    ptt2 = pl.GetPoint3dAt(i -1);
+                    if (bulge == 0)
+                    {
+                        length = ptt.GetDistanceBetweenTwoPoint(ptt2);
+                        midlenth.Add(length);
+                    }
+                    else 
+                    {
+                        double l1 = pl.GetDistanceAtParameter(i);
+                        double l2 = pl.GetDistanceAtParameter(i - 1);
+                        length =Math.Abs(l2 - l1);
+                        midlenth.Add(length);
+                    }
+                }
+            }
+
+            if (pl.Closed == true)
+            {
+                midlenth.Add(Math.Abs(pl.Length - pl.GetDistanceAtParameter(vn-1)));//闭合多段线多一条线。
+            }
+
+            return midlenth;
+        }
+        /// <summary>
+        /// 如果是闭合多段线，数量与节点个数一致，即比不闭合的多1个
+        /// </summary>
+        /// <param name="pl">polyline</param>
+        /// <param name="button">判断起点是否是一致</param>
+        /// <returns>List<string></returns>
+        public static List<string> GetMidAngle(this Polyline pl, bool button)
+        {
+            int vn = pl.NumberOfVertices;
+            List<string> value=new List<string>();
+            List<Point3d> point = pl.GetVertices();
+            //前vn-1个点
+            if (button)
+            {
+                for (int i = 0; i < vn - 1; i++)
+                {
+                    double bulge = pl.GetBulgeAt(i);
+                    if (bulge == 0)
+                    {
+                        value.Add("直线段");
+                    }
+                    if (bulge != 0)
+                    {
+                        string ang = "";
+                        double degree = (Math.Atan(bulge) * 4).AngleToDegree();//clockwise:"-"
+                        double L = point[i].GetDistanceBetweenTwoPoint(point[i + 1]);
+                        double R = Math.Abs(L / 2 / Math.Sin(Math.Atan(bulge) * 2));
+                        ang = "R=" + string.Format("{0:N}", R) + "\nθ=" + string.Format("{0:N}", degree) + "%%D";
+                        value.Add(ang);
+                    }
+                }
+            }
+            else
+            {
+                for (int i = vn-1; i>0; i--)
+                {
+                    double bulge = pl.GetBulgeAt(i);
+                    if (bulge == 0)
+                    {
+                        value.Add("直线段");
+                    }
+                    if (bulge != 0)
+                    {
+                        string ang = "";
+                        double degree = -(Math.Atan(bulge) * 4).AngleToDegree();//clockwise:"-"
+                        double L = point[i].GetDistanceBetweenTwoPoint(point[i - 1]);
+                        double R = Math.Abs(L / 2 / Math.Sin(Math.Atan(bulge) * 2));
+                        ang = "R=" + string.Format("{0:N}", R) + "\nθ=" + string.Format("{0:N}", degree) + "%%D";
+                        value.Add(ang);
+                    }
+                }
+            }
+            
+            //最后一个点单独来考虑
+            if (pl.Closed == true && pl.GetBulgeAt(vn - 1) == 0)
+            {
+                value.Add("直线段");
+            }
+
+            if (pl.Closed == true && pl.GetBulgeAt(vn - 1) != 0)
+            {
+                string ang = "";
+                double bulge = pl.GetBulgeAt(vn - 1);
+                double degree = (Math.Atan(bulge) * 4).AngleToDegree();
+                double L = point[vn - 1].GetDistanceBetweenTwoPoint(point[0]);
+                double R = L / 2 / Math.Sin(Math.Atan(bulge) * 2);
+                ang = "R=" + string.Format("{0:N}", R) + "\nθ=" + string.Format("{0:N}", degree) + "%%D";
+                value.Add(ang);
+            }
+            return value;
+        }
+        public static List<double> GetLengthfromStart(this Polyline pl,bool button)
+        {
+            
+            int vn = pl.NumberOfVertices;
+            List<double> length=new List<double>();
+            if (button)
+            {
+                for (var i = 0; i < vn; i++)
+                {
+                    length.Add(pl.GetDistanceAtParameter(i));
+                }                
+            }
+            else
+            {
+                for (var i = 0; i < vn; i++)
+                {
+                    length.Add(pl.Length-pl.GetDistanceAtParameter(vn-1-i));
+                }
+            }
+            if (pl.Closed == true)
+            {
+                length.Add(pl.Length);
+            }
+            return length; 
+        }
+        /// <summary>
+        /// 获得向量与x轴正向的夹角（rad）(0,2Pi)
+        /// </summary>
+        /// <param name="dir">向量</param>
+        /// <returns></returns>
+        public static double GetRotateAngle(this Vector3d dir)
+        {
+            double angle = 0;
+            if (dir.Y == 0 & dir.X == 0) return angle;
+            if (dir.Y >= 0 ) angle = dir.GetAngleTo(Vector3d.XAxis);
+            if (dir.Y <= 0) angle = Math.PI * 2 - dir.GetAngleTo(Vector3d.XAxis);
+            return angle;
+        }
+
+        public static void GetDir(this Vector3d dir)
+        {
+            string r = "";
+            double angle = dir.GetAngleTo(Vector3d.XAxis);
+            if (angle > Math.PI / 4 & angle < Math.PI * 3 / 4) r = "";
+        }
+     }
+}
